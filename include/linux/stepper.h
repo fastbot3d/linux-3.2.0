@@ -11,7 +11,7 @@
 #ifndef _STEPPER_H
 #define _STEPPER_H
 
-#define MAX_STEPPER_NUM 5
+#define MAX_STEPPER_NUM 8
 struct stepper_info {
     char *name;
     int step;
@@ -26,6 +26,11 @@ struct stepper_platform_data {
     int (*check_min_x)(void);
     int (*check_min_y)(void);
     int (*check_min_z)(void);
+
+    int (*check_max_x)(void);
+    int (*check_max_y)(void);
+    int (*check_max_z)(void);
+    int (*check_autoLevel_z)(void);
 };
 
 struct vref_platform_data {

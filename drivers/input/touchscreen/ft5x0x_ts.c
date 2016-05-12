@@ -31,14 +31,18 @@
 #include <linux/earlysuspend.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/gpio.h>
 
 #include "ft5x0x_ts.h"
 
 static struct i2c_client *this_client;
 static struct ft5x0x_ts_platform_data *pdata;
 
-#define CONFIG_FT5X0X_MULTITOUCH 1
+//#define CONFIG_FT5X0X_MULTITOUCH 1
+#undef	CONFIG_FT5X0X_MULTITOUCH 
 #define FT5X06_ID 0x79
+
+#define TSC_RST_GPIO 116 
 
 struct ts_event
 {
@@ -153,7 +157,12 @@ static void ft5x0x_ts_inactivate(void)
 {
 	struct ft5x0x_ts_data *data = i2c_get_clientdata(this_client);
 
+#ifdef CONFIG_FT5X0X_MULTITOUCH
 	input_mt_sync(data->input_dev);
+#else
+	input_report_abs(data->input_dev, ABS_PRESSURE, 0);
+	input_report_key(data->input_dev, BTN_TOUCH, 0);
+#endif
 	input_sync(data->input_dev);
 }
 
@@ -234,11 +243,24 @@ static int ft5x0x_read_data(void)
 		event->y1 = (s16)(buf[5] & 0x0F)<<8 | (s16)buf[6];
 	}
 #endif
-	event->pressure = 200;
+	event->pressure = 10;
 
 	dev_dbg(&this_client->dev, "%s: 1:%d %d 2:%d %d \n", __func__,
 		event->x1, event->y1, event->x2, event->y2);
 
+	return 0;
+}
+
+static int last_point[2]= {0};
+static int filter_point(u32 x, u32 y)
+{
+	int diff_x = abs(last_point[0] - x);
+	int diff_y = abs(last_point[1] - y);
+	if (diff_x <= 2 || diff_y <= 2) {
+			return 1;
+	}
+	last_point[0] = x;
+	last_point[1] = y;
 	return 0;
 }
 
@@ -291,16 +313,38 @@ static void ft5x0x_report_value(void)
 #else	/* CONFIG_FT5X0X_MULTITOUCH*/
 	if (event->touch_point == 1)
 	{
-		input_report_abs(data->input_dev, ABS_Y, SCREEN_MAX_Y - event->x1);
-		input_report_abs(data->input_dev, ABS_X, event->y1);
+		//input_report_abs(data->input_dev, ABS_Y, SCREEN_MAX_Y - event->x1);
+		//input_report_abs(data->input_dev, ABS_X, event->y1);
+		//lkj 1024 * 800.0f  == 5243 /4096 
+		//600 * 480.0f  == 5120 /4096 
+	#if 0
+		int x1 = (event->x1 * 5243)>>12;
+		int y1 = (event->y1 * 5120)>>12;
+	#else
+		int x1 = event->y1;
+		int y1 = event->x1;
+		//int x1 = event->x1;
+		//int y1 = event->y1;
+	#endif
+#if 0
+		if(filter_point(x1, y1)){
+			printk("lkj filter ok\n");
+			return;
+		}
+#endif
+		input_report_abs(data->input_dev, ABS_X, x1);
+		input_report_abs(data->input_dev, ABS_Y, y1);
 		input_report_abs(data->input_dev, ABS_PRESSURE, event->pressure);
+		input_report_key(data->input_dev, BTN_TOUCH, 1);
+		input_sync(data->input_dev);
 	}
-	input_report_key(data->input_dev, BTN_TOUCH, 1);
 #endif	/* CONFIG_FT5X0X_MULTITOUCH*/
-	input_sync(data->input_dev);
+	//input_sync(data->input_dev);
 
-	dev_dbg(&this_client->dev, "%s: 1:%d %d 2:%d %d \n", __func__,
-		event->x1, event->y1, event->x2, event->y2);
+	//dev_info(&this_client->dev, "%s: 1:%d %d \n", __func__,
+	//	event->x1 , event->y1);
+	//dev_dbg(&this_client->dev, "%s: 1:%d %d 2:%d %d \n", __func__,
+	//	(event->x1 * 5243)>>12, (event->y1 * 5120)>>12, event->x2, event->y2);
 }	/*end ft5x0x_report_value*/
 
 static void ft5x0x_ts_pen_irq_work(struct work_struct *work)
@@ -309,16 +353,18 @@ static void ft5x0x_ts_pen_irq_work(struct work_struct *work)
 
 	ret = ft5x0x_read_data();	
 
-	if (ret == 0)
-		ft5x0x_report_value();
+	if (ret == 0) {
+		ft5x0x_report_value(); 	 
+	}
 }
 
 static irqreturn_t ft5x0x_ts_interrupt(int irq, void *dev_id)
 {
 	struct ft5x0x_ts_data *ft5x0x_ts = dev_id;
 
-	if (!work_pending(&ft5x0x_ts->pen_event_work))
+	if (!work_pending(&ft5x0x_ts->pen_event_work)) {
 		queue_work(ft5x0x_ts->ts_workqueue, &ft5x0x_ts->pen_event_work);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -339,7 +385,8 @@ static int ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	struct input_dev *input_dev;
 	int err = 0;
 	int rev_id = 0;
-	
+
+
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		err = -ENODEV;
 		goto err_out;
@@ -369,8 +416,7 @@ static int ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id
 		err = -ESRCH;
 		goto err_free_thread;
 	}
-
-	err = request_irq(client->irq, ft5x0x_ts_interrupt, IRQF_DISABLED | IRQF_TRIGGER_RISING, "ft5x0x_ts", ft5x0x_ts);
+ 	err = request_irq(client->irq, ft5x0x_ts_interrupt, IRQF_DISABLED | IRQF_TRIGGER_RISING, "ft5x0x_ts", ft5x0x_ts);
 	if (err < 0)
 	{
 		dev_err(&client->dev, "request irq failed\n");
@@ -387,7 +433,7 @@ static int ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	
 	ft5x0x_ts->input_dev = input_dev;
 
-#ifdef CONFIG_FT5X0X_MULTITOUCH
+  #ifdef CONFIG_FT5X0X_MULTITOUCH
 	set_bit(ABS_MT_TOUCH_MAJOR, input_dev->absbit);
 	set_bit(ABS_MT_POSITION_X, input_dev->absbit);
 	set_bit(ABS_MT_POSITION_Y, input_dev->absbit);
@@ -416,6 +462,8 @@ static int ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	set_bit(EV_KEY, input_dev->evbit);
 
 	input_dev->name	= FT5X0X_NAME;
+	input_dev->id.bustype = BUS_I2C;
+	input_dev->dev.parent = &client->dev;
 	err = input_register_device(input_dev);
 	if (err)
 	{
@@ -482,6 +530,13 @@ static struct i2c_driver ft5x0x_ts_driver =
 
 static int __init ft5x0x_ts_init(void)
 {
+	gpio_set_value(TSC_RST_GPIO, 1);
+	msleep(20);
+	gpio_set_value(TSC_RST_GPIO, 0);
+	msleep(10);
+	gpio_set_value(TSC_RST_GPIO, 1);
+	msleep(360);
+
 	return i2c_add_driver(&ft5x0x_ts_driver);
 }
 

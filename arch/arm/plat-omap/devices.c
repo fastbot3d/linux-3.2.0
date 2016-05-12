@@ -152,6 +152,34 @@ static void omap_init_uwire(void)
 static inline void omap_init_uwire(void) {}
 #endif
 
+void __init omap_pru_reserve_sdram_memblock(void)
+{
+	phys_addr_t size = SZ_1M * 1;
+	phys_addr_t paddr = 0x80e00000;
+
+	if (!size)
+		return;
+
+	if (!memblock_is_region_memory(paddr, size)) {
+		pr_err("Illegal ddr region 0x%08x..0x%08x for PRU\n",
+				paddr, paddr + size - 1);
+		return;
+	}
+
+	if (memblock_is_region_reserved(paddr, size)) {
+		pr_err("FB: failed to reserve VRAM - busy\n");
+		return;
+	}
+
+	if (memblock_reserve(paddr, size) < 0) {
+		pr_err("FB: failed to reserve VRAM - no memory\n");
+		return;
+	}
+
+	memblock_free(paddr, size);
+	memblock_remove(paddr, size);
+}
+
 #if defined(CONFIG_TIDSPBRIDGE) || defined(CONFIG_TIDSPBRIDGE_MODULE)
 
 static phys_addr_t omap_dsp_phys_mempool_base;

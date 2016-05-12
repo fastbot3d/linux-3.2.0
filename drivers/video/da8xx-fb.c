@@ -406,6 +406,20 @@ static struct da8xx_panel known_lcd_panels[] = {
             .name = "HJ070NA13A",
             .width = 1024,
             .height = 600,
+            .hfp = 160,
+            .hbp = 140,
+            .hsw = 20,
+            .vfp = 12,
+            .vbp = 20,
+            .vsw = 3,
+            .pxl_clk = 51200000,
+            .invert_pxl_clk = 0,
+    },
+#if 0
+    [12] = {
+            .name = "HJ070NA13A",
+            .width = 1024,
+            .height = 600,
             .hfp = 1,
             .hbp = 45,
             .hsw = 30,
@@ -415,6 +429,7 @@ static struct da8xx_panel known_lcd_panels[] = {
             .pxl_clk = 50000000,
             .invert_pxl_clk = 0,
     },
+#endif
 };
 
 /* Enable the Raster Engine of the LCD Controller */

@@ -47,6 +47,7 @@
 #include <linux/skbuff.h>
 #include <linux/lis3lv02d.h>
 #include <linux/w1-gpio.h>
+#include <linux/i2c/ads1015.h>
 #include <linux/stepper.h>
 
 #include <video/da8xx-fb.h>
@@ -104,7 +105,6 @@ struct evm_dev_cfg {
 static u32 am335x_evm_id;
 static struct omap_board_config_kernel am335x_evm_config[] __initdata = {
 };
-
 /*
 * EVM Config held in On-Board eeprom device.
 *
@@ -113,24 +113,24 @@ static struct omap_board_config_kernel am335x_evm_config[] __initdata = {
 *  Name			Size	Contents
 *			(Bytes)
 *-------------------------------------------------------------
-*  Header		4	0xAA, 0x55, 0x33, 0xEE
+*  Header		 4	0xAA, 0x55, 0x33, 0xEE
 *
-*  Board Name		8	Name for board in ASCII.
-*				Example "A33515BB" = "AM335x 15x15 Base Board"
+*  Board Name	 8	Name for board in ASCII.
+*				 Example "A33515BB" = "AM335x 15x15 Base Board"
 *
-*  Version		4	Hardware version code for board	in ASCII.
-*				"1.0A" = rev.01.0A
+*  Version		 4	Hardware version code for board	in ASCII.
+*				 "1.0A" = rev.01.0A
 *
-*  Serial Number	12	Serial number of the board. This is a 12
-*				character string which is WWYY4P16nnnn, where
-*				WW = 2 digit week of the year of production
-*				YY = 2 digit year of production
-*				nnnn = incrementing board number
+*  Serial Number 12	Serial number of the board. This is a 12
+*				 character string which is WWYY4P16nnnn, where
+*				 WW = 2 digit week of the year of production
+*				 YY = 2 digit year of production
+*				 nnnn = incrementing board number
 *
-*  Configuration option	32	Codes(TBD) to show the configuration
-*				setup on this board.
+*  Configuration option	32 Codes(TBD) to show the configuration
+*				 setup on this board.
 *
-*  Available		32720	Available space for other non-volatile data.
+*  Available	 32720	Available space for other non-volatile data.
 */
 struct am335x_evm_eeprom_config {
 	u32	 header;
@@ -140,7 +140,8 @@ struct am335x_evm_eeprom_config {
 	u8	 opt[32];
 };
 
-static void setup_beaglebone_black(void);
+static void setup_fastbot_bbp1(void);
+static void setup_fastbot_bbp1s(void);
 static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context);
 
 static struct am335x_evm_eeprom_config config;
@@ -152,6 +153,27 @@ static bool daughter_brd_detected;
 static char am335x_mac_addr[EEPROM_NO_OF_MAC_ADDR][ETH_ALEN];
 
 #define AM335X_EEPROM_HEADER		0xEE3355AA
+
+enum { BBP1=1, BBP1S=2, BBP_UNKNOW};
+int bbp_board_type = BBP1;
+
+int get_board_type()
+{
+	return bbp_board_type;
+}
+
+static void get_eeprom_board_type()
+{
+	int ret = 0; 
+	if(!strncasecmp("bbp1s", config.name, 5)) {
+		ret = BBP1S;
+	} else if(!strncasecmp("bbp1", config.name, 4)){
+		ret = BBP1;
+	}
+
+	bbp_board_type = ret;
+	printk("board_type:0x%x\n", ret);
+}
 
 static int am33xx_evmid = -EINVAL;
 
@@ -166,7 +188,6 @@ void am335x_evm_set_id(unsigned int evmid)
 	am33xx_evmid = evmid;
 	return;
 }
-
 /*
 * am335x_evm_get_id - returns Board Type (EVM/BB/EVM-SK ...)
 *
@@ -178,7 +199,6 @@ int am335x_evm_get_id(void)
 	return am33xx_evmid;
 }
 EXPORT_SYMBOL(am335x_evm_get_id);
-
 /*
 * @evm_id - evm id which needs to be configured
 * @dev_cfg - single evm structure which includes
@@ -242,7 +262,6 @@ static void setup_pin_mux(struct pinmux_config *pin_mux)
 }
 /*----------------------------------------------------------- 
  * W1-gpio for DS18B20 
- * TODO: not include in unicron_A2A
  -----------------------------------------------------------*/
 #define UNICRON_W1_GPIO GPIO_TO_PIN(1, 6)
 
@@ -257,7 +276,7 @@ static struct platform_device bone_w1_device = {
 	.dev.platform_data = &w1_gpio_pdata,
 };
 
-static void w1_gpio_init(int evm_id, int profile )
+static void w1_gpio_init(int evm_id, int profile)
 {
 	int err;
 	err = platform_device_register(&bone_w1_device);
@@ -289,8 +308,12 @@ static struct pinmux_config ehrpwm0_pin_mux[] = {
 };
 
 /* pin mux for ehrpwm1 */
-static struct pinmux_config ehrpwm1_pin_mux[] = {
+static struct pinmux_config ehrpwm1A_pin_mux[] = {
 	{"gpmc_a2.ehrpwm1A", OMAP_MUX_MODE6 | AM33XX_PIN_OUTPUT},
+	{NULL, 0},
+};
+
+static struct pinmux_config ehrpwm1B_pin_mux[] = {
 	{"gpmc_a3.ehrpwm1B", OMAP_MUX_MODE6 | AM33XX_PIN_OUTPUT},
 	{NULL, 0},
 };
@@ -343,19 +366,49 @@ static void ehrpwm0_init(int evm_id, int profile)
 
 static void ehrpwm1_init(int evm_id, int profile)
 {
-	setup_pin_mux(ehrpwm1_pin_mux);
+    if (bbp_board_type == BBP1S) {
+	    setup_pin_mux(ehrpwm1B_pin_mux);
+    } else {
+	    setup_pin_mux(ehrpwm1A_pin_mux);
+	    setup_pin_mux(ehrpwm1B_pin_mux);
+    }
 
 	pwm_pdata[4].chan_attrib[0].max_freq = 4096;
 	pwm_pdata[4].chan_attrib[0].inverse_pol = false;
 
-	pwm_pdata[4].chan_attrib[1].max_freq = 4096;
-	pwm_pdata[4].chan_attrib[1].inverse_pol = false;
+    if (bbp_board_type == BBP1S) {
+        pwm_pdata[4].chan_attrib[1].max_freq = 4096;
+        pwm_pdata[4].chan_attrib[1].inverse_pol = true;
+    } else {
+        pwm_pdata[4].chan_attrib[1].max_freq = 4096;
+        pwm_pdata[4].chan_attrib[1].inverse_pol = false;
+    }
 
 	am33xx_register_ehrpwm(1, &pwm_pdata[4]);
 }
 /*----------------------------------------------------------- 
+ * Fan&Light control (BBP 1 only)
+ * Enable or disable fan&light power
+ * Fan3 : gpio1_9
+ * Fan4 : gpio1_8
+ * Fan5 : gpio0_14
+ -----------------------------------------------------------*/
+static struct pinmux_config fan_pin_mux[] = {
+	{"uart0_rtsn.gpio1_9", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"uart0_ctsn.gpio1_8", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"uart1_rxd.gpio0_14", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{NULL, 0},
+};
+
+#define FAN3_GPIO     GPIO_TO_PIN(1, 9)
+#define FAN4_GPIO     GPIO_TO_PIN(1, 8)
+#define FAN5_GPIO     GPIO_TO_PIN(0, 14)
+static void fan_init(int evm_id, int profile)
+{
+	setup_pin_mux(fan_pin_mux);
+}
+/*----------------------------------------------------------- 
  * power button
- * TODO: not include in unicorn_a2a
  -----------------------------------------------------------*/
 #define PWR_IRQ_GPIO     GPIO_TO_PIN(3, 16)
 static struct pinmux_config pwr_button_pin_mux[] = {
@@ -365,7 +418,6 @@ static struct pinmux_config pwr_button_pin_mux[] = {
 
 static int pwr_button_gpio_init(void)
 {
-    printk("[Truby]: pwr button init\n");
 	if (gpio_request(PWR_IRQ_GPIO, "irq") < 0) {
 		printk(KERN_ERR "Failed to request GPIO%d for POWER BUTTON IRQ\n", 
                 PWR_IRQ_GPIO);
@@ -378,7 +430,6 @@ static int pwr_button_gpio_init(void)
 
 static void pwr_button_gpio_exit(void)
 {
-    printk("[Truby]: pwr button exit\n");
     gpio_free(PWR_IRQ_GPIO);
 }
 
@@ -410,7 +461,7 @@ static void pwr_button_init(int evm_id, int profile)
 }
 /*----------------------------------------------------------- 
  * LMSW
- * min_x -> gpio2_1
+ * min_x -> gpio2_1     
  * min_y -> gpio1_17
  * min_z -> gpio0_31
  * max_x -> gpio0_30
@@ -424,6 +475,7 @@ static void pwr_button_init(int evm_id, int profile)
 #define MAX_X_GPIO     GPIO_TO_PIN(0, 30)
 #define MAX_Y_GPIO     GPIO_TO_PIN(1, 29)
 #define MAX_Z_GPIO     GPIO_TO_PIN(0, 15)
+#define AUTOLEVEL_Z_GPIO	GPIO_TO_PIN(0, 14)
 
 static struct pinmux_config lmsw_pin_mux[] = {
 	{"gpmc_clk.gpio2_1",    OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
@@ -431,7 +483,7 @@ static struct pinmux_config lmsw_pin_mux[] = {
 	{"gpmc_wpn.gpio0_31",   OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
 
 	{"gpmc_wait0.gpio0_30", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
-	{"gpmc_csn0.gpio1_29",  OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLUP},
+	{"gpmc_csn0.gpio1_29",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
 	{"uart1_txd.gpio0_15",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
 
 	{NULL, 0},
@@ -547,37 +599,69 @@ static int lmsw_check_min_z(void)
 {
     return gpio_get_value(MIN_Z_GPIO) ? 0 : 1;
 }
+
+static int lmsw_check_max_x(void)
+{
+    return gpio_get_value(MAX_X_GPIO) ? 0 : 1;
+}
+
+static int lmsw_check_max_y(void)
+{
+    return gpio_get_value(MAX_Y_GPIO) ? 0 : 1;
+}
+
+static int lmsw_check_max_z(void)
+{
+    return gpio_get_value(MAX_Z_GPIO) ? 0 : 1;
+}
+
+static int check_autoLevel_z(void)
+{
+    return gpio_get_value(AUTOLEVEL_Z_GPIO) ? 0 : 1;
+}
 /*----------------------------------------------------------- 
  * Stepper Motor
- * step_x    -> gpio1_21
- * step_y    -> gpio1_22
- * step_z    -> gpio1_23
- * step_ext1 -> gpio1_28
- * step_ext2 -> gpiio1_24
+ * step_x    -> gpio1_21  BBP 1/1S
+ * step_y    -> gpio1_22  BBP 1/1S
+ * step_z    -> gpio1_23  BBP 1/1S
+ * step_ext1 -> gpio1_28  BBP 1/1S
+ * step_ext2 -> gpio1_24  BBP 1/1S
+ * step_ext3 -> gpio1_25  BBP 1S
+ * step_user -> gpio1_27  BBP 1S
+ * step_exp  -> gpio1_18  BBP 1S
  *
- * dir_x     -> gpio2_0
- * dir_y     -> gpio2_4
- * dir_z     -> gpio2_3
- * dir_ext1  -> gpio2_2
- * dir_ext2  -> gpio2_5
+ * dir_x     -> gpio2_0   BBP 1/1S
+ * dir_y     -> gpio2_4   BBP 1/1S
+ * dir_z     -> gpio2_3   BBP 1/1S
+ * dir_ext1  -> gpio2_2   BBP 1/1S
+ * dir_ext2  -> gpio2_5   BBP 1/1S
+ * dir_ext3  -> gpio3_7   BBP 1S
+ * dir_user  -> gpio3_8   BBP 1S
+ * dir_exp   -> gpio0_20  BBP 1S
  *
- * fault_x   -> gpio0_20
- * fault_y   -> gpio3_7
- * fault_z   -> gpio3_8
- * fault_ext1-> gpio1_25
- * fault_ext2-> gpio1_27
+ * fault_x   -> gpio0_20  BBP 1
+ * fault_y   -> gpio3_7   BBP 1
+ * fault_z   -> gpio3_8   BBP 1
+ * fault_ext1-> gpio1_25  BBP 1
+ * fault_ext2-> gpio1_27  BBP 1
  -----------------------------------------------------------*/
 #define STEP_X_GPIO     GPIO_TO_PIN(1, 21)
 #define STEP_Y_GPIO     GPIO_TO_PIN(1, 22)
 #define STEP_Z_GPIO     GPIO_TO_PIN(1, 23)
 #define STEP_EXT1_GPIO  GPIO_TO_PIN(1, 28)
 #define STEP_EXT2_GPIO  GPIO_TO_PIN(1, 24)
+#define STEP_EXT3_GPIO  GPIO_TO_PIN(1, 25)
+#define STEP_USER_GPIO  GPIO_TO_PIN(1, 27)
+#define STEP_EXP_GPIO   GPIO_TO_PIN(1, 18)
 
 #define DIR_X_GPIO      GPIO_TO_PIN(2, 0)
 #define DIR_Y_GPIO      GPIO_TO_PIN(2, 4)
 #define DIR_Z_GPIO      GPIO_TO_PIN(2, 3)
 #define DIR_EXT1_GPIO   GPIO_TO_PIN(2, 2)
 #define DIR_EXT2_GPIO   GPIO_TO_PIN(2, 5)
+#define DIR_EXT3_GPIO   GPIO_TO_PIN(3, 7)
+#define DIR_USER_GPIO   GPIO_TO_PIN(3, 8)
+#define DIR_EXP_GPIO    GPIO_TO_PIN(0, 20)
 
 #define FAULT_X_GPIO    GPIO_TO_PIN(0, 20)
 #define FAULT_Y_GPIO    GPIO_TO_PIN(3, 7)
@@ -585,44 +669,71 @@ static int lmsw_check_min_z(void)
 #define FAULT_EXT1_GPIO GPIO_TO_PIN(1, 25)
 #define FAULT_EXT2_GPIO GPIO_TO_PIN(1, 27)
 
-/* TODO: 12V power enable */
+/* 12V power enable */
 #define PWR_EN_GPIO     GPIO_TO_PIN(0, 12)
 
-#define FAULT_X_GPIO    GPIO_TO_PIN(0, 20)
-#define FAULT_Y_GPIO    GPIO_TO_PIN(3, 7)
-#define FAULT_Z_GPIO    GPIO_TO_PIN(3, 8)
-#define FAULT_EXT1_GPIO GPIO_TO_PIN(1, 25)
-#define FAULT_EXT2_GPIO GPIO_TO_PIN(1, 27)
 /* pin mux for stepper motor */
-static struct pinmux_config stepper_pin_mux[] = {
+static struct pinmux_config stepper_pin_mux_bbp1[] = {
 	{"gpmc_a5.gpio1_21",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //step x
 	{"gpmc_a6.gpio1_22",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //step y
 	{"gpmc_a7.gpio1_23",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //step z
 	{"gpmc_ben1.gpio1_28",    OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //step ext1
 	{"gpmc_a8.gpio1_24",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //step ext2
 
-	{"gpmc_csn3.gpio2_0",     OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT}, //dir x
-	{"gpmc_wen.gpio2_4",      OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT}, //dir y
-	{"gpmc_oen_ren.gpio2_3",  OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT}, //dir z
-	{"gpmc_advn_ale.gpio2_2", OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT}, //dir ext1
-	{"gpmc_ben0_cle.gpio2_5", OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT}, //dir ext2
+	{"gpmc_csn3.gpio2_0",     OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir x
+	{"gpmc_wen.gpio2_4",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir y
+	{"gpmc_oen_ren.gpio2_3",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir z
+	{"gpmc_advn_ale.gpio2_2", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir ext1
+	{"gpmc_ben0_cle.gpio2_5", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir ext2
     
-    {"event_intr1.gpio0_20",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault x
-    {"emu0.gpio3_7",          OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault y
-    {"emu1.gpio3_8",          OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault z
-    {"gpmc_a9.gpio1_25",      OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault ext1
-    {"gpmc_a11.gpio1_27",     OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault ext2
+    {"xdma_event_intr1.gpio0_20",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP}, //fault x
+    {"emu0.gpio3_7",          OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},      //fault y
+    {"emu1.gpio3_8",          OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},      //fault z
+    {"gpmc_a9.gpio1_25",      OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},      //fault ext1
+    {"gpmc_a11.gpio1_27",     OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},      //fault ext2
 
 	{"uart1_ctsn.gpio0_12",   OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //12V-EN
 
 	{NULL, 0},
 };
 
+static struct pinmux_config stepper_pin_mux_bbp1s[] = {
+	{"gpmc_a5.gpio1_21",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step x
+	{"gpmc_a6.gpio1_22",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step y
+	{"gpmc_a7.gpio1_23",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step z
+	{"gpmc_ben1.gpio1_28",    OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step ext1
+	{"gpmc_a8.gpio1_24",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step ext2
+    {"gpmc_a9.gpio1_25",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step ext3
+    {"gpmc_a11.gpio1_27",     OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step user
+	{"gpmc_a2.gpio1_18",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //step exp
+
+	{"gpmc_csn3.gpio2_0",     OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT},      //dir x
+	{"gpmc_wen.gpio2_4",      OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT},      //dir y
+	{"gpmc_oen_ren.gpio2_3",  OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT},      //dir z
+	{"gpmc_advn_ale.gpio2_2", OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT},      //dir ext1
+	{"gpmc_ben0_cle.gpio2_5", OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT},      //dir ext2
+    {"emu0.gpio3_7",          OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //dir ext3
+    {"emu1.gpio3_8",          OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //dir user
+    {"xdma_event_intr1.gpio0_20",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, //dir exp
+
+	{"uart1_ctsn.gpio0_12",   OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},      //12V-EN
+
+	{NULL, 0},
+};
+
 static void stepper_init(int evm_id, int profile)
 {
-    printk("[Truby]: stepper motor init\n");
-	setup_pin_mux(stepper_pin_mux);
-    
+    if (bbp_board_type == BBP1) {
+	    setup_pin_mux(stepper_pin_mux_bbp1);
+    } else if(bbp_board_type == BBP1S) {
+	    setup_pin_mux(stepper_pin_mux_bbp1s);
+    }
+
+    if(bbp_board_type == BBP1S) {
+     	gpio_request(14, "autoLevel"); //gpio0_14;
+    	gpio_direction_output(14, 1);
+    }
+
     /* stepper step gpios */
     gpio_request(STEP_X_GPIO, "step x");
     gpio_direction_output(STEP_X_GPIO, 0);
@@ -638,6 +749,17 @@ static void stepper_init(int evm_id, int profile)
 
     gpio_request(STEP_EXT2_GPIO, "step ext2");
     gpio_direction_output(STEP_EXT2_GPIO, 0);
+
+    if (bbp_board_type == BBP1S) {
+        gpio_request(STEP_EXT3_GPIO, "step ext3");
+        gpio_direction_output(STEP_EXT3_GPIO, 0);
+
+        gpio_request(STEP_USER_GPIO, "step user");
+        gpio_direction_output(STEP_USER_GPIO, 0);
+
+        gpio_request(STEP_EXP_GPIO, "step exp");
+        gpio_direction_output(STEP_EXP_GPIO, 0);
+    }
 
     /* stepper dir gpios */
     gpio_request(DIR_X_GPIO, "dir x");
@@ -655,24 +777,36 @@ static void stepper_init(int evm_id, int profile)
     gpio_request(DIR_EXT2_GPIO, "dir ext2");
     gpio_direction_output(DIR_EXT2_GPIO, 0);
     
-    /* stepper  fault gpios */
-    gpio_request(FAULT_X_GPIO, "fault x");
-    gpio_direction_input(FAULT_X_GPIO);
+    if (bbp_board_type == BBP1S) {
+        gpio_request(DIR_EXT3_GPIO, "dir ext3");
+        gpio_direction_output(DIR_EXT3_GPIO, 0);
 
-    gpio_request(FAULT_Y_GPIO, "fault y");
-    gpio_direction_input(FAULT_X_GPIO);
+        gpio_request(DIR_USER_GPIO, "dir user");
+        gpio_direction_output(DIR_USER_GPIO, 0);
 
-    gpio_request(FAULT_Z_GPIO, "fault z");
-    gpio_direction_input(FAULT_X_GPIO);
+        gpio_request(DIR_EXP_GPIO, "dir exp");
+        gpio_direction_output(DIR_EXP_GPIO, 0);
+    }
 
-    gpio_request(FAULT_EXT1_GPIO, "fault ext1");
-    gpio_direction_input(FAULT_EXT1_GPIO);
+    if (bbp_board_type == BBP1) {
+        /* stepper  fault gpios */
+        gpio_request(FAULT_X_GPIO, "fault x");
+        gpio_direction_input(FAULT_X_GPIO);
 
-    gpio_request(FAULT_EXT2_GPIO, "fault ext2");
-    gpio_direction_input(FAULT_EXT2_GPIO);
-    
+        gpio_request(FAULT_Y_GPIO, "fault y");
+        gpio_direction_input(FAULT_X_GPIO);
+
+        gpio_request(FAULT_Z_GPIO, "fault z");
+        gpio_direction_input(FAULT_X_GPIO);
+
+        gpio_request(FAULT_EXT1_GPIO, "fault ext1");
+        gpio_direction_input(FAULT_EXT1_GPIO);
+
+        gpio_request(FAULT_EXT2_GPIO, "fault ext2");
+        gpio_direction_input(FAULT_EXT2_GPIO);
+    }
+
     /* 12V-EN */
-    printk("[Truby]: Enable 12V\n");
     gpio_request(PWR_EN_GPIO, "12V en");
     gpio_direction_output(PWR_EN_GPIO, 1);
 }
@@ -688,7 +822,31 @@ static void stepper_init(int evm_id, int profile)
  * spi1_d1   -> gpio3_16
  * spi1_cs0  -> gpio3_17
  * spi1_cs1  -> gpio0_13
+ *
+ * spi0 --> max6675 (temperature sensor, BBP 1S only)
+ *
  -----------------------------------------------------------*/
+/* pin mux for SPI0 */
+static struct pinmux_config spi0_pin_mux[] = {
+#if 0 
+	{"spi0_sclk.spi0_sclk", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"spi0_d0.spi0_d0",     OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"spi0_d1.spi0_d1",     OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"spi0_cs0.spi0_cs0",   OMAP_MUX_MODE0 | AM33XX_PULL_UP 
+                            | AM33XX_PIN_OUTPUT},
+#else
+    {"spi0_sclk.spi0_sclk", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
+                            | AM33XX_INPUT_EN},       
+    {"spi0_d0.spi0_d0",     OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
+                            | AM33XX_INPUT_EN},       
+    {"spi0_d1.spi0_d1", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
+                            | AM33XX_INPUT_EN},       
+    {"spi0_cs0.spi0_cs0", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
+                            | AM33XX_INPUT_EN},   
+#endif
+	{NULL, 0},
+};
+
 /* pin mux for SPI1 */
 static struct pinmux_config spi1_pin_mux[] = {
 	{"mcasp0_aclkx.spi1_sclk", OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT},
@@ -700,8 +858,7 @@ static struct pinmux_config spi1_pin_mux[] = {
 	{NULL, 0},
 };
 
-/* Stepper Motor platform data */
-static struct stepper_info stepper_infos[] = {
+static struct stepper_info stepper_infos_bbp1[] = {
     {
         .name  = "stepper_x",
         .step  = STEP_X_GPIO,
@@ -734,12 +891,71 @@ static struct stepper_info stepper_infos[] = {
     },
 };
 
-static struct stepper_platform_data stepper_pdata = {
-    .steppers    = stepper_infos,
-    .nsteppers   = ARRAY_SIZE(stepper_infos),
+/* Stepper Motor platform data */
+static struct stepper_info stepper_infos_bbp1s[] = {
+    {
+        .name  = "stepper_x",
+        .step  = STEP_X_GPIO,
+        .dir   = DIR_X_GPIO,
+    },
+    {
+        .name  = "stepper_y",
+        .step  = STEP_Y_GPIO,
+        .dir   = DIR_Y_GPIO,
+    },
+    {
+        .name  = "stepper_z",
+        .step  = STEP_Z_GPIO,
+        .dir   = DIR_Z_GPIO,
+    },
+    {
+        .name  = "stepper_ext1",
+        .step  = STEP_EXT1_GPIO,
+        .dir   = DIR_EXT1_GPIO,
+    },
+    {
+        .name  = "stepper_ext2",
+        .step  = STEP_EXT2_GPIO,
+        .dir   = DIR_EXT2_GPIO,
+    },
+    {
+        .name  = "stepper_ext3",
+        .step  = STEP_EXT3_GPIO,
+        .dir   = DIR_EXT3_GPIO,
+    },
+    {
+        .name  = "stepper_user",
+        .step  = STEP_USER_GPIO,
+        .dir   = DIR_USER_GPIO,
+    },
+    {
+        .name  = "stepper_exp",
+        .step  = STEP_EXP_GPIO,
+        .dir   = DIR_EXP_GPIO,
+    },
+};
+
+static struct stepper_platform_data stepper_pdata_bbp1 = {
+    .steppers    = stepper_infos_bbp1,
+    .nsteppers   = ARRAY_SIZE(stepper_infos_bbp1),
     .check_min_x = lmsw_check_min_x,
     .check_min_y = lmsw_check_min_y,
     .check_min_z = lmsw_check_min_z,
+    .check_max_x = lmsw_check_max_x,
+    .check_max_y = lmsw_check_max_y,
+    .check_max_z = lmsw_check_max_z,
+};
+
+static struct stepper_platform_data stepper_pdata_bbp1s = {
+    .steppers    = stepper_infos_bbp1s,
+    .nsteppers   = ARRAY_SIZE(stepper_infos_bbp1s),
+    .check_min_x = lmsw_check_min_x,
+    .check_min_y = lmsw_check_min_y,
+    .check_min_z = lmsw_check_min_z,
+    .check_max_x = lmsw_check_max_x,
+    .check_max_y = lmsw_check_max_y,
+    .check_max_z = lmsw_check_max_z,
+    .check_autoLevel_z = check_autoLevel_z,
 };
 
 /* DAC088 voltage regulator support */
@@ -898,32 +1114,67 @@ static struct regulator_init_data dac088_regulator_data[] = {
 	},
 };
 
-static struct spi_board_info spi1_slave_info[] = {
+static struct spi_board_info spi_slave_info_bbp1[] = {
 	{
 		.modalias      = "stepper_spi",
 		.irq           = -1,
-		.max_speed_hz  = 2000000, //12000000,
+		.max_speed_hz  = 2000000,
 		.bus_num       = 2,
 		.chip_select   = 1,
-        .platform_data = &stepper_pdata,
+        .platform_data = &stepper_pdata_bbp1,
 	},
 	{
 		.modalias      = "dac088_regulator",
 		.irq           = -1,
-		.max_speed_hz  = 2000000, //12000000,
+		.max_speed_hz  = 2000000,
 		.bus_num       = 2,
 		.chip_select   = 0,
 		.platform_data = &dac088_regulator_data[0],
 	},
 };
 
-/* setup spi1 */
+static struct spi_board_info spi_slave_info_bbp1s[] = {
+	{
+		.modalias      = "stepper_spi",
+		.irq           = -1,
+		.max_speed_hz  = 2000000,
+		.bus_num       = 2,
+		.chip_select   = 1,
+        .platform_data = &stepper_pdata_bbp1s,
+	},
+	{
+		.modalias      = "dac088_regulator",
+		.irq           = -1,
+		.max_speed_hz  = 2000000,
+		.bus_num       = 2,
+		.chip_select   = 0,
+		.platform_data = &dac088_regulator_data[0],
+	},
+	{
+		.modalias      = "max6675",
+		.irq           = -1,
+		.max_speed_hz  = 2000000,
+		.bus_num       = 1,
+		.chip_select   = 0,
+	},
+};
+
+/* setup spi */
 static void spi_init(int evm_id, int profile)
 {
 	setup_pin_mux(spi1_pin_mux);
-	spi_register_board_info(spi1_slave_info,
-			ARRAY_SIZE(spi1_slave_info));
-	return;
+
+    if (bbp_board_type == BBP1S) {
+	    setup_pin_mux(spi0_pin_mux);
+    }
+
+    if (bbp_board_type == BBP1) {
+	    spi_register_board_info(spi_slave_info_bbp1, 
+                                ARRAY_SIZE(spi_slave_info_bbp1));
+    } else if (bbp_board_type == BBP1S) {
+	    spi_register_board_info(spi_slave_info_bbp1s, 
+                                ARRAY_SIZE(spi_slave_info_bbp1s));
+    }
 }
 
 /* vref consumer devices */
@@ -992,12 +1243,55 @@ static struct platform_device vref_consumer_ext2 = {
     },
 };
 
+static struct vref_platform_data vref_ext3_data = {
+    .name = "vref_ext3",
+    .def_uV = 1600000,
+};
+
+static struct platform_device vref_consumer_ext3 = {
+    .name = "vref_consumer_ext3",
+    .id   = -1,
+    .dev = {
+        .platform_data = &vref_ext3_data,
+    },
+};
+
+static struct vref_platform_data vref_ext4_data = {
+    .name = "vref_ext4",
+    .def_uV = 1600000,
+};
+
+static struct platform_device vref_consumer_ext4 = {
+    .name = "vref_consumer_ext4",
+    .id   = -1,
+    .dev = {
+        .platform_data = &vref_ext4_data,
+    },
+};
+
+
+static struct vref_platform_data vref_ext5_data = {
+    .name = "vref_ext5",
+    .def_uV = 1600000,
+};
+
+static struct platform_device vref_consumer_ext5 = {
+    .name = "vref_consumer_ext5",
+    .id   = -1,
+    .dev = {
+        .platform_data = &vref_ext5_data,
+    },
+};
+
 static struct platform_device *vref_consumers[] = {
     &vref_consumer_x,
     &vref_consumer_y,
     &vref_consumer_z,
     &vref_consumer_ext1,
     &vref_consumer_ext2,
+    &vref_consumer_ext3,
+    &vref_consumer_ext4,
+    &vref_consumer_ext5,
 };
 
 static void dac_init(int evm_id, int profile)
@@ -1031,12 +1325,12 @@ static void adc_init(int evm_id, int profile)
 /*----------------------------------------------------------- 
  * I2C
  *           |--> TPS65217C
- *    I2C0 --|--> cat24c256 0x50  eeprom
+ *    I2C0 --|--> cat24c256 0x57  eeprom
  *
  *    I2C1 --|--> FT5x06    0x38  cap ts
  *
  -----------------------------------------------------------*/
-static struct at24_platform_data am335x_baseboard_eeprom_info = {
+static struct at24_platform_data eeprom_info = {
 	.byte_len       = (256*1024) / 8,
 	.page_size      = 64,
 	.flags          = AT24_FLAG_ADDR16,
@@ -1047,27 +1341,26 @@ static struct at24_platform_data am335x_baseboard_eeprom_info = {
 static struct i2c_board_info __initdata am335x_i2c0_boardinfo[] = {
 	{
 		/* Baseboard board EEPROM */
-		I2C_BOARD_INFO("24c256", BASEBOARD_I2C_ADDR),
-		.platform_data  = &am335x_baseboard_eeprom_info,
+		I2C_BOARD_INFO("24c256", 0x57),
+		.platform_data  = &eeprom_info,
 	},
 };
 
 static void __init i2c0_init(void)
 {
-	/* Initially assume General Purpose EVM Config */
 	am335x_evm_id = BEAGLE_BONE_BLACK;
 
 	omap_register_i2c_bus(1, 100, am335x_i2c0_boardinfo,
 				ARRAY_SIZE(am335x_i2c0_boardinfo));
 }
-
 /*
  * ts ft5x06
  */
 #define TSC_RST_GPIO GPIO_TO_PIN(3, 20)
 #define TSC_IRQ_GPIO GPIO_TO_PIN(3, 19)
 static struct pinmux_config ts_pin_mux[] = {
-   {"mcasp0_fsr.gpio3_19", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+   //{"mcasp0_fsr.gpio3_19", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLDOWN},
+   {"mcasp0_fsr.gpio3_19", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLDOWN},
    {"mcasp0_axr1.gpio3_20", OMAP_MUX_MODE7 | AM33XX_PULL_UP | AM33XX_PIN_OUTPUT},
    {NULL, 0},
 };
@@ -1076,12 +1369,12 @@ static void ts_init(int evm_id, int profile)
 {
 	setup_pin_mux(ts_pin_mux);
 
-    printk("[Truby]: ts init\n");
 	if (gpio_request(TSC_IRQ_GPIO, "ts_irq") < 0) {
 		printk(KERN_ERR "Failed to request GPIO%d for ts IRQ\n", 
                 TSC_IRQ_GPIO);
 		return;
 	}
+
 	gpio_direction_input(TSC_IRQ_GPIO);
 
 	if (gpio_request(TSC_RST_GPIO, "ts_rst") < 0) {
@@ -1093,26 +1386,102 @@ static void ts_init(int evm_id, int profile)
 }
 
 /* pinmux for i2c1 */
-static struct pinmux_config i2c1_pin_mux[] = {
-	{"spi0_d1.i2c1_sda", OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
-					        AM33XX_PULL_UP | AM33XX_INPUT_EN},
-	{"spi0_cs0.i2c1_scl", OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
-					        AM33XX_PULL_UP | AM33XX_PIN_OUTPUT},
+static struct pinmux_config i2c1_pin_mux_bbp1[] = {
+	{"spi0_d1.i2c1_sda",    OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
+					        AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
+	{"spi0_cs0.i2c1_scl",   OMAP_MUX_MODE2 | AM33XX_SLEWCTRL_SLOW |
+					        AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
 	{NULL, 0},
 };
 
-static struct i2c_board_info i2c1_boardinfo[] = {
+static struct pinmux_config i2c1_pin_mux_bbp1s[] = {
+	{"uart0_ctsn.i2c1_sda", OMAP_MUX_MODE3 | AM33XX_SLEWCTRL_SLOW |
+					        AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
+	{"uart0_rtsn.i2c1_scl", OMAP_MUX_MODE3 | AM33XX_SLEWCTRL_SLOW |
+					        AM33XX_PULL_ENBL | AM33XX_INPUT_EN},
+	{NULL, 0},
+};
+
+static struct i2c_board_info i2c1_boardinfo_bbp1[] = {
     {
         I2C_BOARD_INFO("ft5x06_ts", 0x38),
+        //I2C_BOARD_INFO("gslx680", 0x40),
         .irq = OMAP_GPIO_IRQ(TSC_IRQ_GPIO),
     },
 };
 
+/* ads1015 */
+static struct ads1015_platform_data ads1015_info = {
+    .channel_data[0] =  
+    {
+        .enabled = true,
+        .pga = 2,
+        .data_rate = 4,
+    },
+    .channel_data[1] =  
+    {
+        .enabled = true,
+        .pga = 2,
+        .data_rate = 4,
+    },
+    .channel_data[2] =  
+    {
+        .enabled = true,
+        .pga = 2,
+        .data_rate = 4,
+    },
+    .channel_data[3] =  
+    {
+        .enabled = true,
+        .pga = 2,
+        .data_rate = 4,
+    },
+};
+
+
+
+static struct i2c_board_info i2c1_boardinfo_bbp1s[] = {
+    {
+        I2C_BOARD_INFO("pca9685-pwm", 0x7F),
+    },
+    {
+        I2C_BOARD_INFO("ft5x06_ts", 0x38),
+        //I2C_BOARD_INFO("gslx680", 0x40),
+        .irq = OMAP_GPIO_IRQ(TSC_IRQ_GPIO),
+    },
+#if 0
+ {
+        /* ADDR -> Ground 0x48 */
+        /* ADDR -> VDD    0x49 */
+        /* ADDR -> SDA    0x4A */
+        /* ADDR -> SDL    0x4B */
+        I2C_BOARD_INFO("ads1015", 0x49),
+        .platform_data = &ads1015_info,
+    },
+#endif
+};
+
 static void i2c1_init(int evm_id, int profile)
 {
-	setup_pin_mux(i2c1_pin_mux);
-	omap_register_i2c_bus(2, 100, i2c1_boardinfo,
-			ARRAY_SIZE(i2c1_boardinfo));
+#if 0
+    printk("[Truby]: Set I2C 1 for TP\n");
+    setup_pin_mux(i2c1_pin_mux_bbp1);
+    //omap_register_i2c_bus(2, 100, i2c1_boardinfo_bbp1,
+    omap_register_i2c_bus(2, 200, i2c1_boardinfo_bbp1,
+            ARRAY_SIZE(i2c1_boardinfo_bbp1));
+#else
+    if (bbp_board_type == BBP1) {
+        printk("[BBP1]: Set I2C 1 for TP\n");
+	    setup_pin_mux(i2c1_pin_mux_bbp1);
+	    omap_register_i2c_bus(2, 1, i2c1_boardinfo_bbp1,
+			    ARRAY_SIZE(i2c1_boardinfo_bbp1));
+    } else {
+        printk("[BBP1]: Set I2C 2 for TP\n");
+	    setup_pin_mux(i2c1_pin_mux_bbp1s);
+	    omap_register_i2c_bus(2, 1, i2c1_boardinfo_bbp1s,
+			    ARRAY_SIZE(i2c1_boardinfo_bbp1s));
+    }
+#endif
 	return;
 }
 /*----------------------------------------------------------- 
@@ -1222,7 +1591,6 @@ static void lcdc_init(int evm_id, int profile)
 	struct da8xx_lcdc_platform_data *lcdc_pdata;
 	setup_pin_mux(lcdc_pin_mux);
     
-    printk("[Truby]: lcdc_init.......\n");
 	if (conf_disp_pll(300000000)) {
 		printk("Failed configure display PLL, not attempting to"
 				"register LCDC\n");
@@ -1324,8 +1692,18 @@ static void hdmi_init(int evm_id, int profile)
 
 /* Backlight : EHRPWM1B */
 #define AM335X_BACKLIGHT_MAX_BRIGHTNESS        100
-#define AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS    80
+#define AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS    90
 #define AM335X_PWM_PERIOD_NANO_SECONDS        (5000 * 10)
+
+#define BL_EN_GPIO          GPIO_TO_PIN(0, 19)
+#define LCD_PWR_EN_GPIO     GPIO_TO_PIN(3, 21)
+
+/* pin mux for backlight control */
+static struct pinmux_config backlight_pin_mux[] = {
+	{"xdma_event_intr0.gpio0_19",   OMAP_MUX_MODE7 | AM33XX_PULL_UP, AM33XX_PIN_OUTPUT}, //BL-EN
+    {"mcasp0_ahclkx.gpio3_21", OMAP_MUX_MODE7 | AM33XX_PULL_UP | AM33XX_PIN_OUTPUT},
+	{NULL, 0},
+};
 static struct platform_pwm_backlight_data backlight_pdata = {
 	.pwm_id         = "ehrpwm.1",
 	.ch             = 1,
@@ -1346,6 +1724,26 @@ static struct platform_device backlight_device = {
 
 static int __init backlight_init(void)
 {
+	setup_pin_mux(backlight_pin_mux);
+
+	if (gpio_request(BL_EN_GPIO, "bl_en") < 0) {
+		printk(KERN_ERR "Failed to request GPIO%d for bl enable\n", 
+                TSC_IRQ_GPIO);
+		return 0;
+	}
+	gpio_direction_output(BL_EN_GPIO, 1);
+	gpio_set_value(BL_EN_GPIO, 1);
+
+	if (gpio_request(LCD_PWR_EN_GPIO, "lcd_pwr_en") < 0) {
+		printk(KERN_ERR "Failed to request GPIO%d for lcd pwr enable\n", 
+                TSC_RST_GPIO);
+		return 0;
+	}
+
+//printk("<0> lkj test lcd power 1\n"); 
+	gpio_direction_output(LCD_PWR_EN_GPIO, 1);
+	gpio_set_value(LCD_PWR_EN_GPIO, 0);
+
     platform_device_register(&backlight_device);
 	return 0;
 }
@@ -1392,14 +1790,14 @@ static struct pinmux_config mmc1_dat4_7_pin_mux[] = {
 
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
 	{
+		.mmc            = 0,	/* will be set at runtime */
+	},
+	{
 		.mmc            = 1,
 		.caps           = MMC_CAP_4_BIT_DATA,
 		.gpio_cd        = GPIO_TO_PIN(0, 6),
-		.gpio_wp        = GPIO_TO_PIN(3, 18),
+        .gpio_wp        = -EINVAL,
 		.ocr_mask       = MMC_VDD_32_33 | MMC_VDD_33_34, /* 3V3 */
-	},
-	{
-		.mmc            = 0,	/* will be set at runtime */
 	},
 	{
 		.mmc            = 0,	/* will be set at runtime */
@@ -1411,13 +1809,12 @@ static void mmc1_init(int evm_id, int profile)
 {
     setup_pin_mux(mmc1_common_pin_mux);
     setup_pin_mux(mmc1_dat4_7_pin_mux);
-
-    am335x_mmc[1].mmc		   = 2;
-    am335x_mmc[1].caps		   = MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA;
-    am335x_mmc[1].nonremovable = true;
-    am335x_mmc[1].gpio_cd	   = -EINVAL;
-    am335x_mmc[1].gpio_wp	   = -EINVAL;
-    am335x_mmc[1].ocr_mask	   = MMC_VDD_32_33 | MMC_VDD_33_34; /* 3V3 */
+    am335x_mmc[0].mmc		   = 2;
+    am335x_mmc[0].caps		   = MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA;
+    am335x_mmc[0].nonremovable = true;
+    am335x_mmc[0].gpio_cd	   = -EINVAL;
+    am335x_mmc[0].gpio_wp	   = -EINVAL;
+    am335x_mmc[0].ocr_mask	   = MMC_VDD_32_33 | MMC_VDD_33_34; /* 3V3 */
 	return;
 }
 
@@ -1485,39 +1882,32 @@ static void mii1_init(int evm_id, int profile)
 }
 /*----------------------------------------------------------- 
  * GPIO led
- * TODO: not include in unicorn_a2a
  -----------------------------------------------------------*/
 /* pinmux for gpio based led */
 static struct pinmux_config gpio_led_mux[] = {
-    {"gpmc_a2.gpio1_18",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
-	{"gpmc_a3.gpio1_19",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"mcasp0_aclkr.gpio3_18",      OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
     {NULL, 0},
 };
 
 static struct gpio_led gpio_leds[] = {
 	{
-		.name			        = "usr0",
-		.gpio			        = GPIO_TO_PIN(1, 18),
-        .default_trigger        = "mmc1",
-	},
-	{
 		.name			        = "usr1",
-		.gpio			        = GPIO_TO_PIN(1, 19),
-        .default_trigger        = "heartbeat",
+		.gpio			        = GPIO_TO_PIN(3, 18),
+        .default_trigger        = "default-on",
 	},
 };
 
 static struct gpio_led_platform_data gpio_led_info = {
-        .leds           = gpio_leds,
-        .num_leds       = ARRAY_SIZE(gpio_leds),
+    .leds           = gpio_leds,
+    .num_leds       = ARRAY_SIZE(gpio_leds),
 };
 
 static struct platform_device leds_gpio = {
-        .name   = "leds-gpio",
-        .id     = -1,
-        .dev    = {
-                .platform_data  = &gpio_led_info,
-        },
+    .name   = "leds-gpio",
+    .id     = -1,
+    .dev    = {
+            .platform_data  = &gpio_led_info,
+    },
 };
 
 static void gpio_leds_init(int evm_id, int profile)
@@ -1780,8 +2170,11 @@ static void tps65217_init(int evm_id, int profile)
 		return;
 	}
 
+#if 0 
+    //FIXME: Allow power on by OTG to run at high frequency.
 	if (!(val & TPS65217_STATUS_ACPWR)) {
 		/* If powered by USB then disable OPP120, OPPTURBO and OPPNITRO*/
+		/*	
 		pr_info("Maximum current provided by the USB port is 500mA"
 			" which is not sufficient\nwhen operating @OPP120, OPPTURBO and"
 			" OPPNITRO. The current requirement for some\nuse-cases"
@@ -1790,11 +2183,14 @@ static void tps65217_init(int evm_id, int profile)
 			" confident that the current\nrequirements for OPP100"
 			" use-case don't exceed the USB limits, switching\nto"
 			" AC power is recommended.\n");
+		
 		opp_disable(mpu_dev, 600000000);
 		opp_disable(mpu_dev, 720000000);
 		opp_disable(mpu_dev, 800000000);
 		opp_disable(mpu_dev, 1000000000);
+		*/
 	}
+#endif
 }
 /*----------------------------------------------------------- 
  * RTC
@@ -1871,45 +2267,82 @@ static void sgx_init(int evm_id, int profile)
 	}
 }
 
-/* Beaglebone Black */
-static struct evm_dev_cfg beaglebone_black_dev_cfg[] = {
+/* FastBot BBP 1 */
+static struct evm_dev_cfg bbp1_dev_cfg[] = {
 	{rtc_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
 	{tps65217_init,	  DEV_ON_BASEBOARD, PROFILE_NONE},
 	{mii1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
 	{adc_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
 	{usb0_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
 	{usb1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
-	{mmc0_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
 	{mmc1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
-    //{i2c1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
-	{sgx_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mmc0_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+    {spi_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
 	{ecap0_init,      DEV_ON_BASEBOARD, PROFILE_NONE},
 	{ehrpwm0_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
 	{ehrpwm1_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
+    {i2c1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{fan_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
+	{sgx_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
     {dac_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
-    {spi_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
     {stepper_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
     {lmsw_init,       DEV_ON_BASEBOARD, PROFILE_NONE},
 	{lcdc_init,       DEV_ON_BASEBOARD, PROFILE_NONE},
+	{gpio_leds_init,  DEV_ON_BASEBOARD, PROFILE_NONE},
 	{ts_init,         DEV_ON_BASEBOARD, PROFILE_NONE},
-	//{gpio_leds_init,  DEV_ON_BASEBOARD, PROFILE_NONE},
     //{pwr_button_init, DEV_ON_BASEBOARD, PROFILE_NONE},
-    //{hdmi_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+    //{hdmi_init,	    DEV_ON_BASEBOARD, PROFILE_NONE},
+    //{w1_gpio_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
+	{NULL, 0, 0},
+};
+
+/* FastBot BBP 1S */
+static struct evm_dev_cfg bbp1s_dev_cfg[] = {
+	{rtc_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
+	{tps65217_init,	  DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mii1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{adc_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
+	{usb0_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{usb1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mmc1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mmc0_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+    {spi_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
+	{ecap0_init,      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{ehrpwm1_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
+    {i2c1_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+	{sgx_init,	      DEV_ON_BASEBOARD, PROFILE_NONE},
+    {dac_init,        DEV_ON_BASEBOARD, PROFILE_NONE},
+    {stepper_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
+    {lmsw_init,       DEV_ON_BASEBOARD, PROFILE_NONE},
+	{lcdc_init,       DEV_ON_BASEBOARD, PROFILE_NONE},
+	{gpio_leds_init,  DEV_ON_BASEBOARD, PROFILE_NONE},
+	{ts_init,         DEV_ON_BASEBOARD, PROFILE_NONE},
+    //{pwr_button_init, DEV_ON_BASEBOARD, PROFILE_NONE},
+    //{hdmi_init,	    DEV_ON_BASEBOARD, PROFILE_NONE},
     //{w1_gpio_init,    DEV_ON_BASEBOARD, PROFILE_NONE},
 	{NULL, 0, 0},
 };
 
 /* BeagleBone Black */
-static void setup_beaglebone_black(void)
+static void setup_fastbot_bbp1(void)
 {
-	pr_info("The board is a AM335x Beaglebone Black.\n");
-
-	/* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
-	am335x_mmc[0].gpio_wp = -EINVAL;
-
-	_configure_device(BEAGLE_BONE_BLACK, beaglebone_black_dev_cfg, PROFILE_NONE);
+	pr_info("The board is FastBot BBP 1\n");
+	_configure_device(BEAGLE_BONE_BLACK, bbp1_dev_cfg, PROFILE_NONE);
 
 	/* TPS65217 regulator has full constraints */
+    //FIXME:  Please check it out!!!!!!
+	//regulator_has_full_constraints();
+
+	am33xx_cpsw_init(AM33XX_CPSW_MODE_MII, NULL, NULL);
+}
+
+static void setup_fastbot_bbp1s(void)
+{
+	pr_info("The board is FastBot BBP 1S\n");
+	_configure_device(BEAGLE_BONE_BLACK, bbp1s_dev_cfg, PROFILE_NONE);
+
+	/* TPS65217 regulator has full constraints */
+    //FIXME:  Please check it out!!!!!!
 	//regulator_has_full_constraints();
 
 	am33xx_cpsw_init(AM33XX_CPSW_MODE_MII, NULL, NULL);
@@ -2017,6 +2450,7 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 	char tmp[10];
 	struct device *mpu_dev;
 
+    //FIXME: Mac Addr
 #if 0
 	/* 1st get the MAC address from EEPROM */
 	ret = mem_acc->read(mem_acc, (char *)&am335x_mac_addr,
@@ -2030,15 +2464,34 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 	/* Fillup global mac id */
 	am33xx_cpsw_macidfillup(&am335x_mac_addr[0][0],
 				&am335x_mac_addr[1][0]);
+#endif
 
-	/* get board specific data */
+	/* get board specific data from eeprom */
 	ret = mem_acc->read(mem_acc, (char *)&config, 0, sizeof(config));
 	if (ret != sizeof(config)) {
-		pr_err("AM335X EVM config read fail, read %d bytes\n", ret);
+		pr_err("BBP board config read fail, read %d bytes\n", ret);
 		pr_err("This likely means that there either is no/or a failed EEPROM\n");
 		goto out;
 	}
-#endif
+
+	snprintf(tmp, sizeof(config.name) + 1, "%s", config.name);
+	pr_info("Board name: %s\n", tmp);
+	snprintf(tmp, sizeof(config.version) + 1, "%s", config.version);
+	pr_info("Board version: %s\n", tmp);
+
+	get_eeprom_board_type();
+
+    //FIXME: Please check it out!
+    //mpu_dev = omap_device_get_by_hwmod_name("mpu");
+    //opp_enable(mpu_dev, AM33XX_ES2_0_OPPNITRO_FREQ);
+
+    if (bbp_board_type == BBP1S) {
+	    setup_fastbot_bbp1s();
+    } else {
+	    setup_fastbot_bbp1();
+    }
+
+	am335x_opp_update();
 
 #if 0
 	if (config.header != AM335X_EEPROM_HEADER) {
@@ -2052,12 +2505,9 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 			config.name);
 		goto out;
 	}
+#endif
 
-	snprintf(tmp, sizeof(config.name) + 1, "%s", config.name);
-	pr_info("Board name: %s\n", tmp);
-	snprintf(tmp, sizeof(config.version) + 1, "%s", config.version);
-	pr_info("Board version: %s\n", tmp);
-
+#if 0
 	if (!strncmp("A335BNLT", config.name, 8)) {
 		daughter_brd_detected = false;
 		if(!strncmp("0A5A", config.version, 4) ||
@@ -2070,10 +2520,7 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 	} else {
 		goto out;
 	}
-#else
-	setup_beaglebone_black();
 #endif
-	am335x_opp_update();
 
 	return;
 
@@ -2218,9 +2665,16 @@ static void __init am335x_unicron_map_io(void)
 	omapam33xx_map_common_io();
 }
 
+extern void __init omap_pru_reserve_sdram_memblock(void);
+static void __init unicorn_omap_reserve(void)
+{
+    omap_pru_reserve_sdram_memblock();
+}
+
 //TODO: change uboot Machine ID to use UNICRON
 MACHINE_START(AM335XEVM, "am335xevm")
 	.atag_offset	= 0x100,
+	.reserve		= unicorn_omap_reserve,
 	.map_io		    = am335x_unicron_map_io,
 	.init_early	    = am33xx_init_early,
 	.init_irq	    = ti81xx_init_irq,

@@ -1753,7 +1753,9 @@ void device_shutdown(void)
 			dev->bus->shutdown(dev);
 		} else if (dev->driver && dev->driver->shutdown) {
 			dev_dbg(dev, "shutdown\n");
-			dev->driver->shutdown(dev);
+			if (strcmp("pvrsrvkm", dev_name(dev))) {//lkj
+				dev->driver->shutdown(dev);
+			}
 		}
 		put_device(dev);
 

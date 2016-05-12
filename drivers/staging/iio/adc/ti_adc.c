@@ -22,6 +22,8 @@
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/sched.h>
+#include <linux/delay.h>
+#include <linux/semaphore.h>
 
 #include "../iio.h"
 #include "../sysfs.h"
@@ -38,9 +40,13 @@ struct adc_device {
 	wait_queue_head_t	wq_data_avail;
 	int			channels;
 	int			irq;
+	spinlock_t reg_lock; 
+	struct semaphore sem;
 	bool			is_continuous_mode;
 	u16			*buffer;
 };
+
+static int read_adc(struct iio_dev *idev, int chan,	int *val);
 
 static unsigned int adc_readl(struct adc_device *adc, unsigned int reg)
 {
@@ -135,8 +141,178 @@ static ssize_t tiadc_set_mode(struct device *dev,
 static IIO_DEVICE_ATTR(mode, S_IRUGO | S_IWUSR, tiadc_show_mode,
 		tiadc_set_mode, 0);
 
+static ssize_t tiadc_show_voltage1(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+//	struct adc_device *adc_dev = iio_priv(indio_dev);
+	unsigned int tmp, val= -1;
+	tmp = read_adc(indio_dev, 1, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage2(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+//	struct adc_device *adc_dev = iio_priv(indio_dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 2, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage3(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 3, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage4(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 4, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage5(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 5, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage6(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 6, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage7(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 7, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static ssize_t tiadc_show_voltage8(struct device *dev, 	struct device_attribute *attr, char *buf)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	unsigned int tmp, val = -1;
+	tmp = read_adc(indio_dev, 8, &val);
+	if (tmp > 0) {
+		return sprintf(buf, "%d\n", val);
+	} else {
+		return sprintf(buf, "%d\n", -1);
+	}
+}
+static IIO_DEVICE_ATTR(voltage1, S_IRUGO | S_IWUSR, tiadc_show_voltage1, NULL, 0);
+static IIO_DEVICE_ATTR(voltage2, S_IRUGO | S_IWUSR, tiadc_show_voltage2, NULL, 0);
+static IIO_DEVICE_ATTR(voltage3, S_IRUGO | S_IWUSR, tiadc_show_voltage3, NULL, 0);
+static IIO_DEVICE_ATTR(voltage4, S_IRUGO | S_IWUSR, tiadc_show_voltage4, NULL, 0);
+static IIO_DEVICE_ATTR(voltage5, S_IRUGO | S_IWUSR, tiadc_show_voltage5, NULL, 0);
+static IIO_DEVICE_ATTR(voltage6, S_IRUGO | S_IWUSR, tiadc_show_voltage6, NULL, 0);
+static IIO_DEVICE_ATTR(voltage7, S_IRUGO | S_IWUSR, tiadc_show_voltage7, NULL, 0);
+static IIO_DEVICE_ATTR(voltage8, S_IRUGO | S_IWUSR, tiadc_show_voltage8, NULL, 0);
+
+static ssize_t tiadc_show_reg(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	//struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	//struct adc_device *adc_dev = iio_priv(indio_dev);
+	//unsigned int tmp;
+
+#if 0
+ 18 #define TSCADC_REG_RAWIRQSTATUS     0x024
+ 19 #define TSCADC_REG_IRQSTATUS        0x028
+ 20 #define TSCADC_REG_IRQENABLE        0x02C
+ 21 #define TSCADC_REG_IRQCLR       0x030
+ 22 #define TSCADC_REG_IRQWAKEUP        0x034
+ 23 #define TSCADC_REG_CTRL         0x040
+ 24 #define TSCADC_REG_ADCFSM       0x044
+ 25 #define TSCADC_REG_CLKDIV       0x04C
+ 26 #define TSCADC_REG_SE           0x054
+ 27 #define TSCADC_REG_IDLECONFIG       0x058
+ 28 #define TSCADC_REG_CHARGECONFIG     0x05C
+ 29 #define TSCADC_REG_CHARGEDELAY      0x060
+ 30 #define TSCADC_REG_STEPCONFIG(n)    (0x64 + ((n - 1) * 8))
+ 31 #define TSCADC_REG_STEPDELAY(n)     (0x68 + ((n - 1) * 8))
+ 32 #define TSCADC_REG_FIFO0CNT     0xE4
+ 33 #define TSCADC_REG_FIFO0THR     0xE8
+ 34 #define TSCADC_REG_FIFO1CNT     0xF0
+ 35 #define TSCADC_REG_FIFO1THR     0xF4
+ 36 #define TSCADC_REG_FIFO0        0x100
+ 37 #define TSCADC_REG_FIFO1        0x200
+#endif
+
+#if 0
+	tmp =  adc_readl(adc_dev, TSCADC_REG_RAWIRQSTATUS);
+printk("<0>RAWIRQSTATUS:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_IRQSTATUS);
+printk("<0>IRQSTATUS:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_IRQENABLE);
+printk("<0>IRQENABLE:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_IRQCLR     );
+printk("<0>IRQCLR:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_CTRL         );
+printk("<0>IRQCTRL:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_ADCFSM       );
+printk("<0>ADCFSM:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_SE);
+printk("<0>SE:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
+printk("<0>FIFO1CNT:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_FIFO1THR     );
+printk("<0>FIFO1THR:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_FIFO1);
+printk("<0>FIFO1:0x%x ", tmp);
+	tmp = adc_readl(adc_dev, TSCADC_REG_STEPCONFIG(TOTAL_STEPS));
+printk("<0>STEPCONFIG:0x%x ", tmp);
+printk("<0>\n");
+#endif
+
+	return sprintf(buf, "l ok\n");
+}
+
+static IIO_DEVICE_ATTR(reg, S_IRUGO | S_IWUSR, tiadc_show_reg,
+		NULL, 0);
+
 static struct attribute *tiadc_attributes[] = {
 	&iio_dev_attr_mode.dev_attr.attr,
+	&iio_dev_attr_reg.dev_attr.attr,
+	&iio_dev_attr_voltage1.dev_attr.attr,
+	&iio_dev_attr_voltage2.dev_attr.attr,
+	&iio_dev_attr_voltage3.dev_attr.attr,
+	&iio_dev_attr_voltage4.dev_attr.attr,
+	&iio_dev_attr_voltage5.dev_attr.attr,
+	&iio_dev_attr_voltage6.dev_attr.attr,
+	&iio_dev_attr_voltage7.dev_attr.attr,
+	&iio_dev_attr_voltage8.dev_attr.attr,
 	NULL,
 };
 
@@ -201,6 +377,14 @@ static void tiadc_poll_handler(struct work_struct *work_s)
 	iBuf = kmalloc(fifo1count * sizeof(u32), GFP_KERNEL);
 	if (iBuf == NULL)
 		goto out;
+
+	/*
+	 * Wait for ADC sequencer to settle down.
+	 * There could be a scenario where in we
+	 * try to read data from ADC before
+	 * it is available.
+	 */
+	udelay(500);
 
 	for (i = 0; i < fifo1count; i++) {
 		readx1 = adc_readl(adc_dev, TSCADC_REG_FIFO1);
@@ -344,31 +528,128 @@ static void tiadc_channel_remove(struct iio_dev *idev)
 	kfree(idev->channels);
 }
 
+static int read_adc(struct iio_dev *idev, int chan,	int *val)
+{
+	struct adc_device *adc_dev = iio_priv(idev);
+	int i, map_val;
+	bool found = false;
+	unsigned int fifo1count, readx1, stepid;
+	unsigned long timeout = jiffies + usecs_to_jiffies
+			(IDLE_TIMEOUT * adc_dev->channels);
+	int channel = chan + 1;
+
+	if (down_interruptible(&adc_dev->sem)) {
+		//printk("<0> lkj adc down failed 1\n");
+   		return -ERESTARTSYS;
+	}
+
+	//flush fifo
+	fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
+	while (fifo1count--)
+		adc_readl(adc_dev, TSCADC_REG_FIFO1); 
+
+	spin_lock_irq(&adc_dev->reg_lock);
+	adc_writel(adc_dev, TSCADC_REG_SE, 1<<(channel + TOTAL_CHANNELS));
+	spin_unlock_irq(&adc_dev->reg_lock);     
+
+	while (1) {
+		fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
+		if (fifo1count > 0) {
+			break;
+		}
+		if (time_after(jiffies, timeout)){
+			//printk("<0> lkj adc n timeout\n");
+			spin_lock_irq(&adc_dev->reg_lock);
+			readx1 = adc_readl(adc_dev, TSCADC_REG_SE);
+			readx1 = readx1 & (~(1<<(channel + TOTAL_CHANNELS)));
+			adc_writel(adc_dev, TSCADC_REG_SE, readx1);
+			//adc_writel(adc_dev, TSCADC_REG_SE, ~(1<<(channel + TOTAL_CHANNELS)));
+			spin_unlock_irq(&adc_dev->reg_lock);     
+			up(&adc_dev->sem);	
+			return -EAGAIN;
+		}
+	}
+
+	map_val = chan + TOTAL_CHANNELS;
+	for (i = 0; i < fifo1count; i++) {
+		readx1 = adc_readl(adc_dev, TSCADC_REG_FIFO1);
+		stepid = readx1 & TSCADC_FIFOREAD_CHNLID_MASK;
+		stepid = stepid >> 0x10;
+
+		if (stepid == map_val) {
+			readx1 = readx1 & TSCADC_FIFOREAD_DATA_MASK;
+			found = true;
+			*val = readx1;
+		}
+	}
+
+	spin_lock_irq(&adc_dev->reg_lock);
+	readx1 = adc_readl(adc_dev, TSCADC_REG_SE);
+	readx1 = readx1 & (~(1<<(channel + TOTAL_CHANNELS)));
+	adc_writel(adc_dev, TSCADC_REG_SE, readx1);
+	//adc_writel(adc_dev, TSCADC_REG_SE, ~(1<<(channel + TOTAL_CHANNELS)));
+	spin_unlock_irq(&adc_dev->reg_lock);    
+
+	if (found == false) {
+		//printk("<0> lkj adc down failed 2, stepid:%d \n", stepid);
+		up(&adc_dev->sem);	
+		return -EBUSY; 
+	}
+
+	up(&adc_dev->sem);	
+	return IIO_VAL_INT;
+}
+
 static int tiadc_read_raw(struct iio_dev *idev,
 		struct iio_chan_spec const *chan,
 		int *val, int *val2, long mask)
 {
 	struct adc_device *adc_dev = iio_priv(idev);
 	int i, map_val;
+	bool found = false;
 	unsigned int fifo1count, readx1, stepid;
 	unsigned long timeout = jiffies + usecs_to_jiffies
 			(IDLE_TIMEOUT * adc_dev->channels);
+	int channel = chan->channel + 1;
 
 	if (adc_dev->is_continuous_mode) {
 		pr_info("One shot mode not enabled\n");
 		return -EINVAL;
 	} else {
-		adc_writel(adc_dev, TSCADC_REG_SE, TSCADC_STPENB_STEPENB);
+		//flush fifo
+		fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
+		while (fifo1count--)
+			adc_readl(adc_dev, TSCADC_REG_FIFO1); 
 
-		/* Wait for ADC sequencer to complete sampling */
-		while (adc_readl(adc_dev, TSCADC_REG_ADCFSM) &
-				TSCADC_SEQ_STATUS) {
-			if (time_after(jiffies, timeout))
-				return -EAGAIN;
+		spin_lock_irq(&adc_dev->reg_lock);
+		adc_writel(adc_dev, TSCADC_REG_SE, 1<<(channel + TOTAL_CHANNELS));
+		spin_unlock_irq(&adc_dev->reg_lock);     
+
+#if 1
+		while (1) {
+			fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
+			if (fifo1count > 0) {
+				break;
+			}
+				if (time_after(jiffies, timeout)){
+					printk("<0> lkj adc n timeout\n");
+					spin_lock_irq(&adc_dev->reg_lock);
+					adc_writel(adc_dev, TSCADC_REG_SE, ~(1<<(channel + TOTAL_CHANNELS)));
+					spin_unlock_irq(&adc_dev->reg_lock);     
+					return -EAGAIN;
+				}
 		}
+#else
+		/* Wait for ADC sequencer to complete sampling */
+		while (adc_readl(adc_dev, TSCADC_REG_ADCFSM) & TSCADC_SEQ_STATUS) {
+			if (time_after(jiffies, timeout)){
+				printk("<0> lkj adc timeout\n");
+				return -EAGAIN;
+			}
+		}
+#endif
 
 		map_val = chan->channel + TOTAL_CHANNELS;
-		fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
 		for (i = 0; i < fifo1count; i++) {
 			readx1 = adc_readl(adc_dev, TSCADC_REG_FIFO1);
 			stepid = readx1 & TSCADC_FIFOREAD_CHNLID_MASK;
@@ -376,9 +657,17 @@ static int tiadc_read_raw(struct iio_dev *idev,
 
 			if (stepid == map_val) {
 				readx1 = readx1 & TSCADC_FIFOREAD_DATA_MASK;
+				found = true;
 				*val = readx1;
 			}
 		}
+
+		spin_lock_irq(&adc_dev->reg_lock);
+		adc_writel(adc_dev, TSCADC_REG_SE, ~(1<<(channel + TOTAL_CHANNELS)));
+		spin_unlock_irq(&adc_dev->reg_lock);     
+
+		if (found == false) 
+			return -EBUSY; 
 		return IIO_VAL_INT;
 	}
 }
@@ -453,6 +742,8 @@ static int __devinit tiadc_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "attached adc driver\n");
 	platform_set_drvdata(pdev, idev);
+
+	sema_init(&adc_dev->sem, 1);
 
 	return 0;
 

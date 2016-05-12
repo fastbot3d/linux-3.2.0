@@ -140,7 +140,8 @@
  * process one sample data would be
  * around 5 micro seconds.
  */
-#define IDLE_TIMEOUT			5 /* microsec */
+//#define IDLE_TIMEOUT			5 /* microsec */
+#define IDLE_TIMEOUT			300 /* microsec */
 
 #define TSCADC_CELLS			2
 

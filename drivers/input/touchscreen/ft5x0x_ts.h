@@ -2,7 +2,8 @@
 #define __LINUX_FT5X0X_TS_H__
 
 #define SCREEN_MAX_X    1024
-#define SCREEN_MAX_Y    768
+//#define SCREEN_MAX_Y    768
+#define SCREEN_MAX_Y    600
 #define PRESS_MAX       255
 
 #define FT5X0X_NAME	"ft5x06_ts"
